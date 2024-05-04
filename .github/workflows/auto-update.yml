@@ -1,0 +1,78 @@
+name: Auto-update
+
+env:
+  REPO_OWNER: 'twpayne'
+  REPO_NAME: 'chezmoi'
+
+on:
+  watch:
+    types: [started]
+
+jobs:
+  try_update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: get upstream latest release
+        uses: actions/github-script@v7
+        id: upstream_release
+        with:
+          result-encoding: string
+          script: |
+            const repo = { owner: '${{ env.REPO_OWNER }}', repo: '${{ env.REPO_NAME }}' }
+            const response = await github.rest.repos.getLatestRelease(repo)
+            const tag_name = response.data.tag_name
+            console.log(repo, tag_name)
+            return tag_name
+      - name: get local release
+        uses: actions/github-script@v7
+        id: local_release
+        with:
+          result-encoding: string
+          script: |
+            const repo = context.repo;
+            const response = await github.rest.repos.getLatestRelease(repo);
+            const tag_name = response.data.tag_name
+            console.log(repo, tag_name)
+            return tag_name
+      - name: compare to check release
+        id: check_release
+        run: |
+          if [ ${{ steps.upstream_release.outputs.result }} == ${{ steps.local_release.outputs.result }} ]; then
+            echo 'do_release=false' >> $GITHUB_OUTPUT
+          else
+            echo 'do_release=true' >> $GITHUB_OUTPUT
+          fi
+      - name: checkout upstream
+        id: checkout_upstream
+        if: steps.check_release.outputs.do_release == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}'
+          ref: ${{ steps.upstream_release.outputs.result }}
+      - name: setup go
+        id: setup_go
+        if: steps.check_release.outputs.do_release == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: download and package mods
+        id: download_mods
+        if: steps.check_release.outputs.do_release == 'true'
+        run: |
+          version=${{ steps.upstream_release.outputs.result }}
+          version=${version#v}
+          filename=${{ env.REPO_NAME }}-${version}-deps.tar.xz
+          filepath=${HOME}/${filename}
+          GOMODCACHE=${PWD}/go-mod go mod download -modcacherw -x
+          tar --create --auto-compress --file $filepath go-mod
+          echo 'filepath='${filepath} >> $GITHUB_OUTPUT
+      - name: release
+        id: release
+        if: steps.check_release.outputs.do_release == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: ${{ steps.download_mods.outputs.filepath }}
+          tag: ${{ steps.upstream_release.outputs.result }}
+          commit: 'master'

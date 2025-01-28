@@ -3,6 +3,7 @@ name: 'Auto update'
 on:
   schedule:
     - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   try_update:
@@ -10,7 +11,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: WingsZeng/go-auto-deps-action@v1
+      - uses: WingsZeng/go-auto-deps-action@v1.1
         with:
           repo_owner: 'twpayne'
           repo_name: 'chezmoi'
